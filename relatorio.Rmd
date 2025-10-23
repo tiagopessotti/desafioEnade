@@ -1,0 +1,162 @@
+---
+title: "Desafio Enade"
+author: "Tiago José Pessotti"
+output: 
+  html_document: 
+    toc: true
+    toc_depth: 3
+    toc_float: true
+---
+
+Este relatório apresenta os resultados da primeira edição do Desafio Enade, aplicado à turma 2022-2025 do bacharelado em Administração do campus Linhares.
+
+O relatório está estruturado da seguinte maneira:
+
+<ul>
+<li> Resumo: apresenta a nota média obtida pelos participantes, agrupada por área do desafio;</li>
+<li> Resumo por área: apresenta uma tabela com a indicação das questões selecionadas para a área; a quantidade de respostas de cada questão (Tentativas), a porcentagem de acertos (Índice de Facilidade), e o desvio padrão dos acertos;</li>
+<li> Resumo por questão: apresenta o texto de cada uma das questões da área; as alternativas de respostas (Resposta do modelo); a resposta correta (Crédito parcial = 100%); a quantidade de alunos que marcou cada uma das opções (Número) e a frequência, em percentual, de marcação de cada uma das respostas.</li>
+</ul>
+
+Para uma melhor preparação dos estudantes para o Enade e demais processos seletivos por provas, sugere-se:
+
+<ol>
+<li> Identificar, em cada área, as questões cujo resultado médio (Índice de facilidade) foi inferior a 65%;</li>
+<li> Verificar se as ementas das disciplinas da área prevêem o conteúdo das questões identificadas;</li>
+<li> Ajustar o ementário do curso, caso necessário, e reforçar os conteúdos das questões identificadas.</li>
+</ol>
+
+
+```{r setup, include=FALSE}
+library(knitr)
+opts_chunk$set(echo = F) 
+opts_chunk$set(message = F)
+opts_chunk$set(warning = F) 
+```
+
+```{css}
+h1.title {
+  text-align: center;
+  color: darkblue;
+  font-family: "Arial", sans-serif;
+}
+.author {
+  text-align: center;
+  font-style: italic;
+}
+
+```
+
+```{r dados}
+library(readxl)
+library(dplyr)
+library(purrr)
+library(rvest)
+library(xml2)
+
+# Importar as questões do banco de questões do AVA
+pagina <- read_html("parametros/questoesEnade.html")
+
+questoes_html <- pagina %>% 
+  html_elements(".question")
+
+titulos <- questoes_html %>% 
+  html_element("h3") %>% 
+  html_text(trim = T)
+
+questoes_html %>% 
+  xml_find_all(".//*[contains(@class, 'multichoice')]") %>%
+  xml_remove()
+
+conteudos <- questoes_html %>%
+  as.character()
+
+html_df <- tibble(
+  titulo = titulos,
+  conteudo = conteudos
+)
+
+# Importar a planilha com a identificação das áreas de cada questão do enade
+areas <- read_xlsx("parametros/areas.xlsx")
+
+# Importar os resultados do Desafio Enade
+dados <- list.files("resultados/", pattern = "\\.xlsx$", full.names = TRUE) %>%
+  map_dfr(~ read_excel(.x, sheet = 2) %>% 
+            mutate(arquivo=basename(.x)) %>% 
+            left_join(areas) %>% 
+            left_join(html_df, by = c("Nome da questão"="titulo")))
+```
+
+## Resumo
+
+```{r}
+library(stringr)
+dados %>% 
+  select(area=13,valor=5,peso=4) %>% 
+  mutate(valor=str_remove(valor, "%") %>%
+           str_replace_all(",",".") %>% 
+           as.numeric()) %>% 
+  group_by(area) %>% 
+  summarise(
+    media = round(
+      sum(as.numeric(str_remove(valor, "%")) * as.numeric(peso), na.rm=T)/sum(as.numeric(peso), na.rm=T),
+      digits = 1)
+  ) %>% 
+  rename(
+    Área = area,
+    Média = media
+  ) %>% 
+  kable()
+```
+
+<hr style='border: 2px solid black;'>
+
+```{r results='asis'}
+cat('
+<style>
+  ol, ul {
+    margin-left: 0;
+    padding-left: 0;
+    list-style-position: inside;
+  }
+</style>
+')
+
+area_sel <- areas %>% 
+  select(2) %>% 
+  distinct() %>% 
+  arrange(.[[1]])
+
+for (i in 1:nrow(area_sel)) {
+  cat(paste0("<br>","</br>"))
+  
+  cat(paste0("<h2>", area_sel[i, 1], "</h2>\n"))
+  
+  tabela <- dados %>% 
+    filter(.[[13]] == as.character(area_sel[i,1])) %>% 
+    select(3,4,5,6)
+  
+  print(kable(tabela))
+  
+  questoes <- dados %>% 
+    filter(.[[13]] == as.character(area_sel[i,1])) %>% 
+    mutate(id_sheet = paste0('(',.[[1]],') "',.[[3]],'"'))
+  
+  for (q in 1:nrow(tabela)) {
+    questao = questoes[q,]
+    tb_questao <- read_xlsx(paste0("resultados/",questao$arquivo[1]), sheet = questao$id_sheet[1])
+    
+    cat(questao$conteudo)
+    
+    print(kable(tb_questao))
+  
+    cat(paste0("<hr>"))
+
+    }
+
+  cat("<hr style='border: 2px solid black;'>\n")
+
+}
+```
+
+
